@@ -13,18 +13,18 @@ const FACTORS = [
 ];
 
 const FACTOR_LABELS = {
-  "Economy (GDP per Capita)": "GDP",
+  "Economy (GDP per Capita)": "GDP per Capita",
   "Family": "Family",
-  "Health (Life Expectancy)": "Health",
+  "Health (Life Expectancy)": "Health / Life Expectancy",
   "Freedom": "Freedom",
-  "Trust (Government Corruption)": "Trust",
+  "Trust (Government Corruption)": "Trust in Government",
   "Generosity": "Generosity",
-  "Dystopia Residual": "Dystopia",
+  "Dystopia Residual": "Dystopia Residual",
 };
 
 const REGION_COLORS = [
-  "#f5c842","#e07b4a","#5bc4a0","#7b9ef5",
-  "#c46ab3","#e05a6e","#6be0c8","#f5a442","#a0c46a","#9b7bf5",
+  "#F8C062","#595082","#416444","#a89fd4",
+  "#d4c98a","#6b5ea8","#2C7A4B","#c4a84a","#7a6fb5","#88b08a",
 ];
 
 const tooltip = d3.select("#tooltip");
@@ -34,14 +34,13 @@ d3.csv("data/2015.csv", d3.autoType).then(rawData => {
 
   const data = rawData;
 
-  // Regions list
   const regions = [...new Set(data.map(d => d.Region))].sort();
-  const colorScale = d3.scaleOrdinal().domain(regions).range(REGION_COLORS);
+  const regionColor = d3.scaleOrdinal().domain(regions).range(REGION_COLORS);
 
-  // Populate header stat
+  // Header stat
   d3.select("#stat-top").text(data[0].Country);
 
-  // Populate region filter dropdown
+  // Populate region filter
   const regionSel = d3.select("#region-filter");
   regions.forEach(r => regionSel.append("option").attr("value", r).text(r));
 
@@ -55,24 +54,36 @@ d3.csv("data/2015.csv", d3.autoType).then(rawData => {
       : data.filter(d => d.Region === selectedRegion);
   }
 
-  // ── Draw all charts initially ─────────────
-  drawBar(data, colorScale);
-  drawScatter(data, colorScale, selectedFactor);
+  // Factor color scale: light to vivid green based on factor value
+  function makeFactorColorScale(dataset, factor) {
+    return d3.scaleSequential()
+      .domain([0, d3.max(dataset, d => +d[factor])])
+      .interpolator(d3.interpolate("#2C263F", "#F8C062"));
+  }
+
+  // ── Initial draw ──────────────────────────
+  drawBar(data, makeFactorColorScale(data, selectedFactor), selectedFactor);
+  drawScatter(data, regionColor, selectedFactor);
   drawDonut(data);
-  drawStrip(data, colorScale);
+  drawStrip(data, makeFactorColorScale(data, selectedFactor), selectedFactor);
 
   // ── Filter listeners ──────────────────────
   regionSel.on("change", function () {
     selectedRegion = this.value;
     const fd = filteredData();
-    drawBar(fd, colorScale);
-    drawScatter(fd, colorScale, selectedFactor);
-    drawStrip(fd, colorScale);
+    const fcs = makeFactorColorScale(fd, selectedFactor);
+    drawBar(fd, fcs, selectedFactor);
+    drawScatter(fd, regionColor, selectedFactor);
+    drawStrip(fd, fcs, selectedFactor);
   });
 
   d3.select("#factor-select").on("change", function () {
     selectedFactor = this.value;
-    drawScatter(filteredData(), colorScale, selectedFactor);
+    const fd = filteredData();
+    const fcs = makeFactorColorScale(fd, selectedFactor);
+    drawBar(fd, fcs, selectedFactor);
+    drawScatter(fd, regionColor, selectedFactor);
+    drawStrip(fd, fcs, selectedFactor);
   });
 });
 
@@ -95,25 +106,27 @@ function countryTip(d, factor) {
     <span>Region:</span> ${d.Region}<br>
     <span>Rank:</span> #${d["Happiness Rank"]}<br>
     <span>Score:</span> ${(+d["Happiness Score"]).toFixed(3)}<br>
-    ${factor ? `<span>${FACTOR_LABELS[factor] || factor}:</span> ${(+d[factor]).toFixed(3)}` : ""}`;
+    ${factor ? `<span>${FACTOR_LABELS[factor]}:</span> ${(+d[factor]).toFixed(3)}` : ""}`;
 }
 
 // ─────────────────────────────────────────────
 //  CHART 1 — Horizontal Bar Chart (Top 20)
+//  Bars colored by selected factor value
 // ─────────────────────────────────────────────
-function drawBar(data, colorScale) {
+function drawBar(data, factorColorScale, factor) {
   const container = document.getElementById("bar-chart");
   container.innerHTML = "";
 
-  const top20 = data.slice().sort((a,b) => b["Happiness Score"] - a["Happiness Score"]).slice(0, 20);
+  const top20 = data.slice()
+    .sort((a,b) => b["Happiness Score"] - a["Happiness Score"])
+    .slice(0, 20);
 
-  const margin = { top: 10, right: 120, bottom: 30, left: 140 };
+  const margin = { top: 10, right: 200, bottom: 30, left: 140 };
   const width  = container.clientWidth || 900;
   const height = top20.length * 32 + margin.top + margin.bottom;
 
   const svg = d3.select("#bar-chart")
-    .append("svg")
-    .attr("width", "100%")
+    .append("svg").attr("width","100%")
     .attr("viewBox", `0 0 ${width} ${height}`);
 
   const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
@@ -128,27 +141,23 @@ function drawBar(data, colorScale) {
     .call(d3.axisBottom(x).ticks(6).tickSize(H).tickFormat(""))
     .call(g => g.select(".domain").remove());
 
-  // X axis
+  // Axes
   g.append("g").attr("class","axis").attr("transform",`translate(0,${H})`)
     .call(d3.axisBottom(x).ticks(6).tickFormat(d => d.toFixed(1)));
-
-  // Y axis
   g.append("g").attr("class","axis").call(d3.axisLeft(y).tickSize(0))
     .call(g => g.select(".domain").remove())
-    .selectAll("text").attr("fill","#e8e9ef").style("font-size","12px");
+    .selectAll("text").attr("fill","#F8C062").style("font-size","12px");
 
-  // Bars
+  // Bars — colored by factor value
   g.selectAll(".bar")
     .data(top20)
     .join("rect")
     .attr("class","bar")
-    .attr("x", 0)
-    .attr("y", d => y(d.Country))
-    .attr("height", y.bandwidth())
-    .attr("rx", 5)
-    .attr("fill", d => colorScale(d.Region))
+    .attr("x", 0).attr("y", d => y(d.Country))
+    .attr("height", y.bandwidth()).attr("rx", 5)
+    .attr("fill", d => factorColorScale(+d[factor]))
     .attr("width", 0)
-    .on("mouseover", (event, d) => showTooltip(event, countryTip(d)))
+    .on("mouseover", (event, d) => showTooltip(event, countryTip(d, factor)))
     .on("mousemove", moveTooltip)
     .on("mouseout", hideTooltip)
     .transition().duration(600).delay((d,i) => i * 25)
@@ -157,33 +166,41 @@ function drawBar(data, colorScale) {
   // Score labels
   g.selectAll(".bar-label")
     .data(top20)
-    .join("text")
-    .attr("class","bar-label")
+    .join("text").attr("class","bar-label")
     .attr("x", d => x(+d["Happiness Score"]) + 6)
     .attr("y", d => y(d.Country) + y.bandwidth() / 2 + 4)
-    .attr("fill","#e8e9ef")
-    .style("font-size","11px")
+    .attr("fill","#F8C062").style("font-size","11px")
     .text(d => (+d["Happiness Score"]).toFixed(3))
     .attr("opacity", 0)
     .transition().duration(600).delay((d,i) => i*25 + 300)
     .attr("opacity", 1);
 
-  // Legend
-  const legendData = [...new Set(top20.map(d => d.Region))];
-  const legend = svg.append("g")
-    .attr("transform", `translate(${width - margin.right + 10}, ${margin.top})`);
-  legendData.forEach((r, i) => {
-    const lg = legend.append("g").attr("transform", `translate(0, ${i * 20})`);
-    lg.append("circle").attr("r", 5).attr("cx", 5).attr("cy", 5).attr("fill", colorScale(r));
-    lg.append("text").attr("x", 14).attr("y", 9)
-      .style("font-size","10px").attr("fill","#7a7d8f").text(r);
-  });
+  // Color legend (gradient for factor)
+  const legendW = 120, legendH = 10;
+  const legG = svg.append("g")
+    .attr("transform", `translate(${width - margin.right + 20}, ${margin.top + 10})`);
+
+  const defs = svg.append("defs");
+  const gradId = "bar-grad";
+  const grad = defs.append("linearGradient").attr("id", gradId);
+  grad.append("stop").attr("offset","0%").attr("stop-color","#2C263F");
+  grad.append("stop").attr("offset","100%").attr("stop-color","#F8C062");
+
+  legG.append("rect").attr("width", legendW).attr("height", legendH).attr("rx", 3)
+    .attr("fill", `url(#${gradId})`);
+  legG.append("text").attr("x", 0).attr("y", legendH + 13)
+    .attr("fill","#a89fd4").style("font-size","9px").text("Low");
+  legG.append("text").attr("x", legendW).attr("y", legendH + 13)
+    .attr("fill","#a89fd4").style("font-size","9px").attr("text-anchor","end").text("High");
+  legG.append("text").attr("x", legendW / 2).attr("y", -5)
+    .attr("fill","#F8C062").style("font-size","10px").attr("text-anchor","middle")
+    .text(FACTOR_LABELS[factor]);
 }
 
 // ─────────────────────────────────────────────
-//  CHART 2 — Scatter Plot
+//  CHART 2 — Scatter Plot (colored by region)
 // ─────────────────────────────────────────────
-function drawScatter(data, colorScale, factor) {
+function drawScatter(data, regionColor, factor) {
   const container = document.getElementById("scatter-chart");
   container.innerHTML = "";
 
@@ -192,8 +209,7 @@ function drawScatter(data, colorScale, factor) {
   const height = 380;
 
   const svg = d3.select("#scatter-chart")
-    .append("svg")
-    .attr("width","100%")
+    .append("svg").attr("width","100%")
     .attr("viewBox", `0 0 ${width} ${height}`);
 
   const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
@@ -202,8 +218,7 @@ function drawScatter(data, colorScale, factor) {
 
   const x = d3.scaleLinear()
     .domain([0, d3.max(data, d => +d[factor]) * 1.1]).range([0, W]);
-  const y = d3.scaleLinear()
-    .domain([0, 8.5]).range([H, 0]);
+  const y = d3.scaleLinear().domain([0, 8.5]).range([H, 0]);
 
   // Grid
   g.append("g").attr("class","grid")
@@ -213,29 +228,26 @@ function drawScatter(data, colorScale, factor) {
   // Axes
   g.append("g").attr("class","axis").attr("transform",`translate(0,${H})`)
     .call(d3.axisBottom(x).ticks(5));
-  g.append("g").attr("class","axis")
-    .call(d3.axisLeft(y).ticks(6));
+  g.append("g").attr("class","axis").call(d3.axisLeft(y).ticks(6));
 
   // Axis labels
   g.append("text").attr("x", W/2).attr("y", H + 42)
-    .attr("fill","#7a7d8f").style("font-size","11px").attr("text-anchor","middle")
+    .attr("fill","#a89fd4").style("font-size","11px").attr("text-anchor","middle")
     .text(FACTOR_LABELS[factor] || factor);
   g.append("text").attr("transform","rotate(-90)")
     .attr("x", -H/2).attr("y", -42)
-    .attr("fill","#7a7d8f").style("font-size","11px").attr("text-anchor","middle")
+    .attr("fill","#a89fd4").style("font-size","11px").attr("text-anchor","middle")
     .text("Happiness Score");
 
-  // Dots
+  // Dots colored by region
   g.selectAll(".dot")
     .data(data)
-    .join("circle")
-    .attr("class","dot")
+    .join("circle").attr("class","dot")
     .attr("cx", d => x(+d[factor]))
     .attr("cy", d => y(+d["Happiness Score"]))
     .attr("r", 0)
-    .attr("fill", d => colorScale(d.Region))
-    .attr("stroke", "#0e0f14")
-    .attr("opacity", 0.8)
+    .attr("fill", d => regionColor(d.Region))
+    .attr("stroke","#457247").attr("opacity", 0.85)
     .on("mouseover", (event, d) => showTooltip(event, countryTip(d, factor)))
     .on("mousemove", moveTooltip)
     .on("mouseout", hideTooltip)
@@ -245,7 +257,6 @@ function drawScatter(data, colorScale, factor) {
   // Trend line
   const xVals = data.map(d => +d[factor]);
   const yVals = data.map(d => +d["Happiness Score"]);
-  const n = xVals.length;
   const xMean = d3.mean(xVals), yMean = d3.mean(yVals);
   const slope = d3.sum(xVals.map((xi,i) => (xi-xMean)*(yVals[i]-yMean))) /
                 d3.sum(xVals.map(xi => (xi-xMean)**2));
@@ -255,7 +266,7 @@ function drawScatter(data, colorScale, factor) {
   g.append("line")
     .attr("x1", x(x0)).attr("y1", y(slope*x0+intercept))
     .attr("x2", x(x1)).attr("y2", y(slope*x1+intercept))
-    .attr("stroke","#f5c842").attr("stroke-width",1.5)
+    .attr("stroke","#F8C062").attr("stroke-width",1.5)
     .attr("stroke-dasharray","6 3").attr("opacity",0.6);
 }
 
@@ -272,7 +283,7 @@ function drawDonut(data) {
     value: d3.mean(data, d => +d[f]) || 0,
   }));
 
-  const DONUT_COLORS = ["#f5c842","#e07b4a","#5bc4a0","#7b9ef5","#c46ab3","#e05a6e","#6be0c8"];
+  const DONUT_COLORS = ["#F8C062","#595082","#416444","#a89fd4","#d4c98a","#6b5ea8","#2C263F"];
   const colorD = d3.scaleOrdinal().domain(allFactors).range(DONUT_COLORS);
 
   const width  = container.clientWidth || 420;
@@ -287,13 +298,11 @@ function drawDonut(data) {
   const arc = d3.arc().innerRadius(radius * 0.55).outerRadius(radius);
   const arcHover = d3.arc().innerRadius(radius * 0.55).outerRadius(radius + 10);
 
-  const arcs = svg.selectAll(".arc")
-    .data(pie(avgs))
-    .join("g").attr("class","arc");
+  const arcs = svg.selectAll(".arc").data(pie(avgs)).join("g").attr("class","arc");
 
   arcs.append("path")
     .attr("fill", d => colorD(d.data.factor))
-    .attr("stroke","#0e0f14").attr("stroke-width", 2)
+    .attr("stroke","#457247").attr("stroke-width", 2)
     .attr("d", arc)
     .on("mouseover", function(event, d) {
       d3.select(this).transition().duration(150).attr("d", arcHover);
@@ -304,18 +313,15 @@ function drawDonut(data) {
       );
     })
     .on("mousemove", moveTooltip)
-    .on("mouseout", function(event, d) {
+    .on("mouseout", function() {
       d3.select(this).transition().duration(150).attr("d", arc);
       hideTooltip();
     });
 
-  // Center text
-  svg.append("text").attr("class","donut-center-text")
-    .attr("text-anchor","middle").attr("dy","-0.3em")
-    .attr("fill","#e8e9ef").style("font-size","13px").text("Global");
-  svg.append("text").attr("class","donut-center-text")
-    .attr("text-anchor","middle").attr("dy","1.1em")
-    .attr("fill","#e8e9ef").style("font-size","13px").text("Average");
+  svg.append("text").attr("text-anchor","middle").attr("dy","-0.3em")
+    .attr("fill","#F8C062").style("font-size","13px").text("Global");
+  svg.append("text").attr("text-anchor","middle").attr("dy","1.1em")
+    .attr("fill","#F8C062").style("font-size","13px").text("Average");
 
   // Legend
   const legX = -width/2 + 10;
@@ -323,18 +329,18 @@ function drawDonut(data) {
   const legend = svg.append("g").attr("transform",`translate(${legX}, ${legY})`);
   avgs.forEach((d, i) => {
     const lg = legend.append("g").attr("transform",`translate(0,${i*18})`);
-    lg.append("rect").attr("width",10).attr("height",10).attr("rx",2)
-      .attr("fill", colorD(d.factor));
+    lg.append("rect").attr("width",10).attr("height",10).attr("rx",2).attr("fill", colorD(d.factor));
     lg.append("text").attr("x",14).attr("y",9)
-      .attr("fill","#7a7d8f").style("font-size","10px")
+      .attr("fill","#a89fd4").style("font-size","10px")
       .text(FACTOR_LABELS[d.factor]);
   });
 }
 
 // ─────────────────────────────────────────────
-//  CHART 4 — Strip / Beeswarm-ish Plot
+//  CHART 4 — Strip Plot
+//  Dots colored by selected factor value
 // ─────────────────────────────────────────────
-function drawStrip(data, colorScale) {
+function drawStrip(data, factorColorScale, factor) {
   const container = document.getElementById("strip-chart");
   container.innerHTML = "";
 
@@ -366,33 +372,30 @@ function drawStrip(data, colorScale) {
   g.append("g").attr("class","axis")
     .call(d3.axisLeft(y).tickSize(0))
     .call(g => g.select(".domain").remove())
-    .selectAll("text")
-    .attr("fill","#e8e9ef")
-    .style("font-size","11.5px");
+    .selectAll("text").attr("fill","#F8C062").style("font-size","11.5px");
 
   // Median line per region
   regions.forEach(region => {
-    const regionData = data.filter(d => d.Region === region);
-    const med = d3.median(regionData, d => +d["Happiness Score"]);
+    const rd = data.filter(d => d.Region === region);
+    const med = d3.median(rd, d => +d["Happiness Score"]);
     g.append("line")
       .attr("x1", x(med)).attr("x2", x(med))
       .attr("y1", y(region)).attr("y2", y(region) + y.bandwidth())
-      .attr("stroke", colorScale(region)).attr("stroke-width", 2).attr("opacity", 0.5);
+      .attr("stroke","#F8C062").attr("stroke-width", 2).attr("opacity", 0.45);
   });
 
-  // Dots (jittered vertically within band)
+  // Dots — colored by factor value
   const jitterScale = y.bandwidth() * 0.7;
   g.selectAll(".strip-dot")
     .data(data)
-    .join("circle")
-    .attr("class","strip-dot")
+    .join("circle").attr("class","strip-dot")
     .attr("cx", d => x(+d["Happiness Score"]))
     .attr("cy", d => y(d.Region) + y.bandwidth()/2 + (Math.random() - 0.5) * jitterScale)
     .attr("r", 0)
-    .attr("fill", d => colorScale(d.Region))
-    .attr("stroke","#0e0f14").attr("stroke-width",0.5)
-    .attr("opacity", 0.75)
-    .on("mouseover", (event, d) => showTooltip(event, countryTip(d)))
+    .attr("fill", d => factorColorScale(+d[factor]))
+    .attr("stroke","#457247").attr("stroke-width",0.5)
+    .attr("opacity", 0.85)
+    .on("mouseover", (event, d) => showTooltip(event, countryTip(d, factor)))
     .on("mousemove", moveTooltip)
     .on("mouseout", hideTooltip)
     .transition().duration(400).delay((d,i) => i * 3)
@@ -400,6 +403,6 @@ function drawStrip(data, colorScale) {
 
   // X axis label
   g.append("text").attr("x", W/2).attr("y", H + 48)
-    .attr("fill","#7a7d8f").style("font-size","11px").attr("text-anchor","middle")
+    .attr("fill","#a89fd4").style("font-size","11px").attr("text-anchor","middle")
     .text("Happiness Score");
 }
